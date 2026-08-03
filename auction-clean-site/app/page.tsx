@@ -39,6 +39,7 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  // 默认 100 件
   const [itemsPerPage, setItemsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [priceSortState, setPriceSortState] = useState<'none' | 'asc' | 'desc'>('none');
@@ -429,7 +430,7 @@ export default function Home() {
               onClick={handleDownloadCSV}
               disabled={selectedIndexes.length === 0}
             >
-              CSV ({selectedIndexes.length})
+              CSVダウンロード ({selectedIndexes.length})
             </button>
 
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
@@ -470,11 +471,13 @@ export default function Home() {
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
+          {/* ✅ 这里改回了 100 500 1000 */}
           <div className="filter-item">
             <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-              <option value="50">50件</option>
               <option value="100">100件</option>
+              <option value="500">500件</option>
+              <option value="1000">1000件</option>
             </select>
           </div>
           <div className="filter-item">
