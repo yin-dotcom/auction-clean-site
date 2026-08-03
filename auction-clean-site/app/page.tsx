@@ -173,15 +173,15 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      // ✅ 强制过滤安检：在这里直接把没字母的商品完全丢弃掉！
+      // ✅ 強制フィルタリング：ランク（アルファベット）がない商品は完全に除外する！
       const validData = (data || []).filter(item => {
         const rawStatus = item['状態詳細'] || item['ランク'] || '';
-        return parseStatus(rawStatus).rank !== ''; // 只要没有字母，直接干掉
+        return parseStatus(rawStatus).rank !== ''; // アルファベットがない場合は除外
       });
 
       setItems(validData);
       
-      // ✅ 动态修正顶部的总数，扣除那些被抛弃掉的纯文字商品
+      // ✅ 除外された純テキスト商品分を差し引き、上部の総数を動的に修正
       const discardedCount = (data || []).length - validData.length;
       setTotalCount(Math.max(0, (count || 0) - discardedCount));
 
@@ -447,9 +447,9 @@ export default function Home() {
 
         <div className="filter-row">
           <div className="filter-item">
-            <span>大分类:</span>
+            <span>大分類:</span>
             <select value={selectedMainCat} onChange={(e) => handleMainCatChange(e.target.value)}>
-              <option value="ALL">全部 (ALL)</option>
+              <option value="ALL">すべて (ALL)</option>
               <option value="アパレル">アパレル</option>
               <option value="靴">靴</option>
               <option value="小物">小物</option>
@@ -459,26 +459,26 @@ export default function Home() {
             </select>
           </div>
           <div className="filter-item">
-            <span>小分类:</span>
+            <span>小分類:</span>
             <select value={selectedSubCat} onChange={(e) => { setSelectedSubCat(e.target.value); setCurrentPage(1); }}>
               {availableSubCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
           </div>
           <div className="filter-item">
-            <span>等级:</span>
+            <span>ランク:</span>
             <select value={selectedStatus} onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1); }}>
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
           <div className="filter-item">
-            <span>显示数量:</span>
+            <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               <option value="50">50件</option>
               <option value="100">100件</option>
             </select>
           </div>
           <div className="filter-item">
-            <span>期间:</span>
+            <span>開催期間:</span>
             <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
             <span>〜</span>
             <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }} />
@@ -486,14 +486,14 @@ export default function Home() {
 
           <div className="filter-item" style={{ marginLeft: 'auto', gap: '10px' }}>
             <button className={`btn-sort ${priceSortState !== 'none' ? 'active' : ''}`} onClick={togglePriceSort}>
-              {priceSortState === 'none' && "价格顺序: 默认"}
-              {priceSortState === 'asc' && "价格: 低 → 高 ↑"}
-              {priceSortState === 'desc' && "价格: 高 → 低 ↓"}
+              {priceSortState === 'none' && "価格順: 指定なし"}
+              {priceSortState === 'asc' && "価格: 低 → 高 ↑"}
+              {priceSortState === 'desc' && "価格: 高 → 低 ↓"}
             </button>
             <button className={`btn-sort ${dateSortState !== 'none' ? 'active' : ''}`} onClick={toggleDateSort}>
-              {dateSortState === 'none' && "日期顺序: 默认"}
-              {dateSortState === 'desc' && "日期: 新 → 旧 ↓"}
-              {dateSortState === 'asc' && "日期: 旧 → 新 ↑"}
+              {dateSortState === 'none' && "日付順: 指定なし"}
+              {dateSortState === 'desc' && "日付: 新しい順 ↓"}
+              {dateSortState === 'asc' && "日付: 古い順 ↑"}
             </button>
           </div>
         </div>
@@ -501,10 +501,10 @@ export default function Home() {
 
       <div style={{ marginBottom: '15px', fontSize: '13px', color: '#4a4a4a', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          📊 搜索结果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
-          {totalCount > 0 && ` （显示第 ${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件）`}
+          📊 検索結果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
+          {totalCount > 0 && ` （${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件目を表示）`}
         </div>
-        {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 加载中...</div>}
+        {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 読み込み中...</div>}
       </div>
 
       {error ? (
@@ -585,20 +585,20 @@ export default function Home() {
               );
             })
           ) : (
-            !loading && <div className="status-msg">没有找到任何匹配的商品。</div>
+            !loading && <div className="status-msg">該当する商品は見つかりませんでした。</div>
           )}
         </div>
       )}
 
       {totalPages > 1 && (
         <div className="pagination">
-          <button className="page-btn" disabled={currentPage === 1 || loading} onClick={() => { setCurrentPage(prev => Math.max(prev - 1, 1)); window.scrollTo(0,0); }}>上一页</button>
+          <button className="page-btn" disabled={currentPage === 1 || loading} onClick={() => { setCurrentPage(prev => Math.max(prev - 1, 1)); window.scrollTo(0,0); }}>前のページ</button>
           <span className="page-info">{currentPage} / {totalPages}</span>
-          <button className="page-btn" disabled={currentPage === totalPages || loading} onClick={() => { setCurrentPage(prev => Math.min(prev + 1, totalPages)); window.scrollTo(0,0); }}>下一页</button>
+          <button className="page-btn" disabled={currentPage === totalPages || loading} onClick={() => { setCurrentPage(prev => Math.min(prev + 1, totalPages)); window.scrollTo(0,0); }}>次のページ</button>
         </div>
       )}
 
-      {/* 弹窗 */}
+      {/* モーダル */}
       {activeModalItem && (
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
