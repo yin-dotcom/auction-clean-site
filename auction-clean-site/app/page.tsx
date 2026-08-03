@@ -39,7 +39,6 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // 默认 100 件
   const [itemsPerPage, setItemsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [priceSortState, setPriceSortState] = useState<'none' | 'asc' | 'desc'>('none');
@@ -62,6 +61,18 @@ export default function Home() {
     
     const num = parseFloat(strVal.replace(/[¥,]/g, '').trim());
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
+  };
+
+  // ✅ 找回被我弄丢的 Top 3 平均价计算函数！
+  const calculateAvgBid = (i1: any, i2: any, i3: any) => {
+    const p1 = extractSortPrice(i1);
+    const p2 = extractSortPrice(i2);
+    const p3 = extractSortPrice(i3);
+    let sum = 0, count = 0;
+    if (p1 > 0) { sum += p1; count++; }
+    if (p2 > 0) { sum += p2; count++; }
+    if (p3 > 0) { sum += p3; count++; }
+    return count > 0 ? Math.round(sum / count) : 0;
   };
 
   const parseStatus = (statusStr: string) => {
@@ -174,15 +185,13 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      // ✅ 強制フィルタリング：ランク（アルファベット）がない商品は完全に除外する！
       const validData = (data || []).filter(item => {
         const rawStatus = item['状態詳細'] || item['ランク'] || '';
-        return parseStatus(rawStatus).rank !== ''; // アルファベットがない場合は除外
+        return parseStatus(rawStatus).rank !== ''; 
       });
 
       setItems(validData);
       
-      // ✅ 除外された純テキスト商品分を差し引き、上部の総数を動的に修正
       const discardedCount = (data || []).length - validData.length;
       setTotalCount(Math.max(0, (count || 0) - discardedCount));
 
@@ -471,7 +480,6 @@ export default function Home() {
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
-          {/* ✅ 这里改回了 100 500 1000 */}
           <div className="filter-item">
             <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
@@ -640,6 +648,16 @@ export default function Home() {
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>① {activeModalItem['1番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
+                    
+                    {/* ✅ Top 3 平均加回来了！ */}
+                    {calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #f8bbd0', color: '#d81b60' }}>
+                        <span>📈 トップ3平均</span>
+                        <b style={{ marginLeft: 'auto', fontSize: '13px' }}>
+                          {formatPrice(calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']))}
+                        </b>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
