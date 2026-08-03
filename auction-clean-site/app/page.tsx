@@ -63,6 +63,21 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
+  const parseStatus = (statusStr: string) => {
+    if (!statusStr) return { rank: '', text: '' };
+    const safeStr = statusStr.trim();
+
+    const rankRegex = /^(?:ヴィン(?:テージ)?\s*)?[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+(?:\s+[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+)*/i;
+    const match = safeStr.match(rankRegex);
+
+    if (match) {
+      const rank = match[0].trim();
+      const text = safeStr.substring(match[0].length).replace(/^[・\s]+|[・\s]+$/g, '').trim();
+      return { rank: rank.toUpperCase(), text };
+    }
+    return { rank: '', text: '' };
+  };
+
   useEffect(() => {
     if (skipSuggest.current) {
       skipSuggest.current = false;
@@ -112,10 +127,8 @@ export default function Home() {
       setError(null);
       setSelectedIndexes([]);
 
-      // 🚀 优化 1：只拉取需要的字段，节省 90% 流量
-     let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
+      let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
-      // 🚀 优化 2：支持多关键词空格搜索 (例如: "シャネル 黒 バッグ")
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
         keywords.forEach(keyword => {
@@ -147,7 +160,6 @@ export default function Home() {
         query = query.lte('大会開催日', dbEndDate + '퟿'); 
       }
 
-      // 🚀 优化 3：把排序交给数据库，抛弃低效循环
       if (priceSortState !== 'none') {
         query = query.order('自社指値', { ascending: priceSortState === 'asc', nullsFirst: false });
       } else if (dateSortState !== 'none') {
@@ -161,8 +173,17 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      setItems(data || []);
-      setTotalCount(count || 0);
+      // ✅ 强制过滤安检：在这里直接把没字母的商品完全丢弃掉！
+      const validData = (data || []).filter(item => {
+        const rawStatus = item['状態詳細'] || item['ランク'] || '';
+        return parseStatus(rawStatus).rank !== ''; // 只要没有字母，直接干掉
+      });
+
+      setItems(validData);
+      
+      // ✅ 动态修正顶部的总数，扣除那些被抛弃掉的纯文字商品
+      const discardedCount = (data || []).length - validData.length;
+      setTotalCount(Math.max(0, (count || 0) - discardedCount));
 
     } catch (err: any) {
       console.error('Fetch Error:', err);
@@ -408,7 +429,7 @@ export default function Home() {
               onClick={handleDownloadCSV}
               disabled={selectedIndexes.length === 0}
             >
-              CSVダウンロード ({selectedIndexes.length})
+              CSV ({selectedIndexes.length})
             </button>
 
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
@@ -426,9 +447,9 @@ export default function Home() {
 
         <div className="filter-row">
           <div className="filter-item">
-            <span>大分類:</span>
+            <span>大分类:</span>
             <select value={selectedMainCat} onChange={(e) => handleMainCatChange(e.target.value)}>
-              <option value="ALL">すべて (ALL)</option>
+              <option value="ALL">全部 (ALL)</option>
               <option value="アパレル">アパレル</option>
               <option value="靴">靴</option>
               <option value="小物">小物</option>
@@ -438,43 +459,41 @@ export default function Home() {
             </select>
           </div>
           <div className="filter-item">
-            <span>小分類:</span>
+            <span>小分类:</span>
             <select value={selectedSubCat} onChange={(e) => { setSelectedSubCat(e.target.value); setCurrentPage(1); }}>
               {availableSubCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
           </div>
           <div className="filter-item">
-            <span>ランク:</span>
+            <span>等级:</span>
             <select value={selectedStatus} onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1); }}>
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
           <div className="filter-item">
-            <span>表示件数:</span>
+            <span>显示数量:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               <option value="50">50件</option>
               <option value="100">100件</option>
             </select>
           </div>
           <div className="filter-item">
-            <span>開始日:</span>
+            <span>期间:</span>
             <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
-          </div>
-          <div className="filter-item">
-            <span>終了日:</span>
+            <span>〜</span>
             <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }} />
           </div>
 
           <div className="filter-item" style={{ marginLeft: 'auto', gap: '10px' }}>
             <button className={`btn-sort ${priceSortState !== 'none' ? 'active' : ''}`} onClick={togglePriceSort}>
-              {priceSortState === 'none' && "価格順: 指定なし"}
-              {priceSortState === 'asc' && "価格: 低 → 高 ↑"}
-              {priceSortState === 'desc' && "価格: 高 → 低 ↓"}
+              {priceSortState === 'none' && "价格顺序: 默认"}
+              {priceSortState === 'asc' && "价格: 低 → 高 ↑"}
+              {priceSortState === 'desc' && "价格: 高 → 低 ↓"}
             </button>
             <button className={`btn-sort ${dateSortState !== 'none' ? 'active' : ''}`} onClick={toggleDateSort}>
-              {dateSortState === 'none' && "日付順: 指定なし"}
-              {dateSortState === 'desc' && "日付: 新しい順 ↓"}
-              {dateSortState === 'asc' && "日付: 古い順 ↑"}
+              {dateSortState === 'none' && "日期顺序: 默认"}
+              {dateSortState === 'desc' && "日期: 新 → 旧 ↓"}
+              {dateSortState === 'asc' && "日期: 旧 → 新 ↑"}
             </button>
           </div>
         </div>
@@ -482,10 +501,10 @@ export default function Home() {
 
       <div style={{ marginBottom: '15px', fontSize: '13px', color: '#4a4a4a', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          📊 検索結果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
-          {totalCount > 0 && ` （${startIndex + 1} 〜 ${endIndex} 件目を表示）`}
+          📊 搜索结果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
+          {totalCount > 0 && ` （显示第 ${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件）`}
         </div>
-        {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 読み込み中...</div>}
+        {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 加载中...</div>}
       </div>
 
       {error ? (
@@ -498,8 +517,9 @@ export default function Home() {
               const subCategory = item['中分類'] || '-';
               const feature = item['特徴'] || item['商品名'] || '-';
               
-              const status = item['状態詳細'] || item['ランク'] || '';
-              const boxNumber = item['箱番'] || item['商品番号'] || '-';
+              const rawStatus = item['状態詳細'] || item['ランク'] || '';
+              const { rank, text: statusText } = parseStatus(rawStatus);
+
               const eventDate = item['大会開催日'] || item['日付'] || '';
 
               const ourSashine = formatPrice(item['自社指値'] || item['指値2'] || item['指値']);
@@ -531,27 +551,19 @@ export default function Home() {
                   >
                     <input type="checkbox" checked={isSelected} readOnly />
                   </div>
-
-                  <div className="brand-badge">{brand}</div>
                   
-                  {/* 🚀 优化 4：添加懒加载 loading="lazy" */}
                   <img src={imgUrl} alt={brand} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
-                    <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                      <span className="tag-box">📦 {boxNumber}</span>
-                      {eventDate && <span className="tag-date">🗓 {eventDate}</span>}
-                    </div>
+                    {eventDate && <div style={{ marginBottom: '10px' }}><span className="tag-date">🗓 {eventDate}</span></div>}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="item-cat">{subCategory}</span>
-                    </div>
+                    <div className="item-cat">{brand !== '不明' ? `${brand} / ` : ''}{subCategory}</div>
 
                     <div className="item-feat" title={feature}>{feature}</div>
 
                     <div className="tags-container">
-                      {status && <span className="tag-rank">{status}</span>}
-                      {item['出品者'] && <span className="tag-normal">{item['出品者']}</span>}
+                      {rank && <span className="tag-rank">{rank}</span>}
+                      {statusText && <span className="tag-status">{statusText}</span>}
                     </div>
 
                     <div className="price-list">
@@ -573,16 +585,16 @@ export default function Home() {
               );
             })
           ) : (
-            !loading && <div className="status-msg">該当する商品は見つかりませんでした。</div>
+            !loading && <div className="status-msg">没有找到任何匹配的商品。</div>
           )}
         </div>
       )}
 
       {totalPages > 1 && (
         <div className="pagination">
-          <button className="page-btn" disabled={currentPage === 1 || loading} onClick={() => { setCurrentPage(prev => Math.max(prev - 1, 1)); window.scrollTo(0,0); }}>前のページ</button>
+          <button className="page-btn" disabled={currentPage === 1 || loading} onClick={() => { setCurrentPage(prev => Math.max(prev - 1, 1)); window.scrollTo(0,0); }}>上一页</button>
           <span className="page-info">{currentPage} / {totalPages}</span>
-          <button className="page-btn" disabled={currentPage === totalPages || loading} onClick={() => { setCurrentPage(prev => Math.min(prev + 1, totalPages)); window.scrollTo(0,0); }}>次のページ</button>
+          <button className="page-btn" disabled={currentPage === totalPages || loading} onClick={() => { setCurrentPage(prev => Math.min(prev + 1, totalPages)); window.scrollTo(0,0); }}>下一页</button>
         </div>
       )}
 
@@ -591,7 +603,6 @@ export default function Home() {
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setActiveModalItem(null)}>×</button>
-            {/* 🚀 优化 4：添加懒加载 loading="lazy" */}
             <img 
               className="modal-img" 
               style={{ objectFit: 'contain', backgroundColor: '#fafafa' }} 
@@ -601,26 +612,35 @@ export default function Home() {
               onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}
             />
             <div className="modal-title">{activeModalItem['特徴'] || activeModalItem['商品名'] || "無題の商品"}</div>
-            <div className="modal-details">
-              <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
-              <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
-              <p><b>ランク:</b> <span style={{ color: '#f06292', fontWeight: 'bold' }}>{activeModalItem['状態詳細'] || activeModalItem['ランク'] || 'なし'}</span></p>
-              <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
-              <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
-              <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
+            
+            {(() => {
+              const rawModalStatus = activeModalItem['状態詳細'] || activeModalItem['ランク'] || '';
+              const { rank: modalRank, text: modalStatusText } = parseStatus(rawModalStatus);
               
-              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #fce4ec' }}>
-                <p><b>指値:</b> {formatPrice(activeModalItem['指値'])}</p>
-                <p><b>自社指値:</b> <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '15px' }}>{formatPrice(activeModalItem['自社指値'] || activeModalItem['指値2'] || activeModalItem['指値'])}</span></p>
-                <p><b>売価予想:</b> {activeModalItem['売価予想'] || '-'}</p>
-              </div>
+              return (
+                <div className="modal-details">
+                  <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
+                  <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
+                  <p><b>ランク:</b> {modalRank ? <span style={{ color: '#f06292', fontWeight: 'bold' }}>{modalRank}</span> : 'なし'}</p>
+                  {modalStatusText && <p><b>状態詳細:</b> {modalStatusText}</p>}
+                  <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
+                  <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
+                  <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
+                  
+                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #fce4ec' }}>
+                    <p><b>指値:</b> {formatPrice(activeModalItem['指値'])}</p>
+                    <p><b>自社指値:</b> <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '15px' }}>{formatPrice(activeModalItem['自社指値'] || activeModalItem['指値2'] || activeModalItem['指値'])}</span></p>
+                    <p><b>売価予想:</b> {activeModalItem['売価予想'] || '-'}</p>
+                  </div>
 
-              <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>① {activeModalItem['1番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
-              </div>
-            </div>
+                  <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>① {activeModalItem['1番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -646,36 +666,41 @@ export default function Home() {
         .btn-sort { background: white; border: 1px solid var(--primary-color); color: var(--primary-hover); padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s; outline: none; }
         .btn-sort:hover { background: var(--border-color); }
         .btn-sort.active { background: var(--primary-color); color: white; }
-        .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+        .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
         
-        .item-card { background: white; border-radius: 12px; overflow: hidden; border: 2px solid var(--border-color); transition: 0.3s; padding: 10px; position: relative; cursor: pointer; display: flex; flex-direction: column; }
-        .item-card:hover { box-shadow: 0 5px 15px rgba(244,143,177,0.2); transform: translateY(-2px); }
-        .item-card.selected { border: 2px solid #42a5f5; background: #e3f2fd; box-shadow: 0 4px 12px rgba(66, 165, 245, 0.3); }
+        .item-card { background: white; border-radius: 12px; overflow: hidden; border: 1px solid #f0f0f0; transition: 0.3s; padding: 12px; position: relative; cursor: pointer; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .item-card:hover { box-shadow: 0 8px 20px rgba(244,143,177,0.15); transform: translateY(-2px); }
+        .item-card.selected { border: 2px solid #f06292; background: #fff0f5; }
         
-        .checkbox-wrapper { position: absolute; top: 12px; left: 12px; z-index: 20; background: rgba(255, 255, 255, 0.95); padding: 6px; border-radius: 6px; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
-        .checkbox-wrapper:hover { transform: scale(1.1); border-color: #42a5f5; }
-        .checkbox-wrapper input { cursor: pointer; transform: scale(1.3); margin: 0; pointer-events: none; }
+        .checkbox-wrapper { position: absolute; top: 20px; left: 20px; z-index: 20; background: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
+        .checkbox-wrapper:hover { transform: scale(1.1); border-color: #f06292; }
+        .checkbox-wrapper input { cursor: pointer; transform: scale(1.3); margin: 0; pointer-events: none; accent-color: #f06292; }
         
-        .brand-badge { position: absolute; top: 12px; left: 45px; background: rgba(255, 255, 255, 0.9); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; color: var(--text-main); border: 1px solid var(--border-color); backdrop-filter: blur(4px); z-index: 10; }
+        .item-card img { width: 100%; height: 220px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 15px; border: 1px solid #f5f5f5; }
         
-        .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 10px; }
-        .tag-box { background: #e0e0e0; color: #333; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: monospace; }
-        .tag-date { background: #fce4ec; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; }
+        .tag-date { background: #fce4ec; color: #d81b60; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; display: inline-block; }
         
-        .item-info { padding: 5px; display: flex; flex-direction: column; flex: 1; }
-        .item-cat { font-size: 11px; color: var(--primary-hover); font-weight: bold; }
-        .item-feat { font-size: 13px; margin: 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
-        .tags-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-size: 11px; margin-top: auto; }
-        .tag-rank { background: #fff0f5; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #f8bbd0; }
-        .tag-normal { background: #f5f5f5; color: #666; padding: 3px 6px; border-radius: 4px; max-w: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .price-list { margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
+        .item-info { display: flex; flex-direction: column; flex: 1; }
+        
+        .item-cat { font-size: 13px; color: #d81b60; font-weight: bold; margin-bottom: 8px; line-height: 1.4; }
+        
+        .item-feat { font-size: 13px; margin: 4px 0 12px 0; height: 2.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; color: #333; }
+        
+        .tags-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; margin-top: auto; }
+        
+        .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 10px; border-radius: 4px; font-weight: bold; border: 1px solid #f8bbd0; font-size: 11px; }
+        .tag-status { background: #f5f5f5; color: #4a4a4a; padding: 4px 10px; border-radius: 4px; border: 1px solid #e0e0e0; font-size: 11px; }
+        
+        .price-list { margin-top: 10px; border-top: 1px dotted #e0e0e0; padding-top: 15px; }
         .price-row { display: flex; justify-content: space-between; align-items: center; }
-        .label { font-size: 12px; color: var(--text-muted); }
-        .val-red { color: #e74c3c; font-weight: bold; font-size: 15px; }
-        .bid-list-card { margin-top: 8px; padding: 6px 8px; background: #fff0f5; border-radius: 6px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+        .label { font-size: 13px; color: #888; }
+        .val-red { color: #d81b60; font-weight: bold; font-size: 18px; }
+        
+        .bid-list-card { margin-top: 12px; padding: 10px 12px; background: #fff0f5; border-radius: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 5px; }
         .bid-row { display: flex; justify-content: space-between; align-items: center; }
         .bid-user { color: #4a4a4a; font-weight: 500; }
         .bid-val { color: #d81b60; font-weight: bold; }
+        
         .status-msg { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; font-weight: bold; background: white; border-radius: 12px; border: 1px solid var(--border-color); }
         .pagination { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 30px; padding-bottom: 20px; grid-column: 1 / -1; }
         .page-btn { background: white; border: 1px solid var(--primary-color); color: var(--primary-hover); padding: 8px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; outline: none; }
