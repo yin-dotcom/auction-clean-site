@@ -36,8 +36,6 @@ export default function Home() {
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
-  
-  // ✅ 新增的筛选状态：举办形式 & 举办日程
   const [selectedAuctionType, setSelectedAuctionType] = useState('ALL');
   const [selectedVenue, setSelectedVenue] = useState('ALL');
 
@@ -91,7 +89,7 @@ export default function Home() {
       const text = safeStr.substring(match[0].length).replace(/^[・\s]+|[・\s]+$/g, '').trim();
       return { rank: rank.toUpperCase(), text };
     }
-    return { rank: '', text: '' };
+    return { rank: '', text: safeStr }; // 如果没有 Rank，就把整段话当成 text 保留
   };
 
   useEffect(() => {
@@ -145,6 +143,9 @@ export default function Home() {
 
       let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
+      // ✅ 方案B 关键修改：直接在数据库层面过滤掉没有 extracted_rank 的数据！
+      query = query.not('extracted_rank', 'is', null).neq('extracted_rank', '');
+
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
         keywords.forEach(keyword => {
@@ -167,12 +168,10 @@ export default function Home() {
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
 
-      // ✅ 举办形式筛选 (手競 / 入札) - 基于大会開催日
       if (selectedAuctionType !== 'ALL') {
         query = query.ilike('大会開催日', `%${selectedAuctionType}%`);
       }
 
-      // ✅ 举办日程筛选 (前期12 / 後期28 / 大阪16) - 基于大会開催日里的数字
       if (selectedVenue !== 'ALL') {
         if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
         else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
@@ -201,14 +200,8 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      const validData = (data || []).filter(item => {
-        const rawStatus = item['状態詳細'] || item['ランク'] || '';
-        return parseStatus(rawStatus).rank !== ''; 
-      });
-
-      setItems(validData);
-      
-      // ✅ 解决方案A：抛弃被过滤掉的数字，直接使用数据库真实总数，这样分页就不乱跳了
+      // ✅ 方案B 关键修改：不需要前端再 filter 了，拿到的 100 条就是绝对干净的 100 条！
+      setItems(data || []);
       setTotalCount(count || 0);
 
     } catch (err: any) {
@@ -298,7 +291,7 @@ export default function Home() {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, ''); 
             
-            // ✅ 关键修复：自动跳过 CSV 中的 id 列，让 Supabase 自己生成全新的 id，避免覆盖报错
+            // ✅ 跳过 CSV 自带的 id 列
             if (header.toLowerCase() === 'id') return;
             
             if (priceColumns.includes(header)) {
@@ -313,6 +306,11 @@ export default function Home() {
                rowData[header] = val;
             }
           });
+
+          // ✅ 方案B 关键修改：在上传前提前提取 Rank 并存入 extracted_rank 字段
+          const rawStatusForUpload = rowData['状態詳細'] || rowData['ランク'] || '';
+          const { rank: extractedRank } = parseStatus(rawStatusForUpload);
+          rowData['extracted_rank'] = extractedRank || null;
 
           rowData['upload_batch'] = batchId;
           jsonRows.push(rowData);
@@ -346,7 +344,7 @@ export default function Home() {
     const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
     if (selectedItems.length === 0) return;
 
-    const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id');
+    const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id' && k !== 'extracted_rank');
 
     const csvRows = [];
     csvRows.push(headers.join(',')); 
@@ -404,7 +402,7 @@ export default function Home() {
 
   const totalPages = Math.ceil(totalCount / itemsPerPage) || 1;
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, totalCount);
+  const endIndex = Math.min(startIndex + items.length, totalCount);
 
   return (
     <div className="container">
@@ -449,7 +447,7 @@ export default function Home() {
                 }
               }}
             >
-              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全選択"}
+              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全选择"}
             </button>
 
             <button 
@@ -463,7 +461,7 @@ export default function Home() {
 
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
             <button className="btn-search" style={{ background: '#ec407a' }} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              {uploading ? "处理中..." : "CSVアップ"}
+              {uploading ? "処理中..." : "CSVアップ"}
             </button>
           </div>
         </div>
@@ -500,7 +498,6 @@ export default function Home() {
             </select>
           </div>
           
-          {/* ✅ 新增：手競 / 入札 筛选 */}
           <div className="filter-item">
             <span>形式:</span>
             <select value={selectedAuctionType} onChange={(e) => { setSelectedAuctionType(e.target.value); setCurrentPage(1); }}>
@@ -510,7 +507,6 @@ export default function Home() {
             </select>
           </div>
           
-          {/* ✅ 新增：前期 / 後期 / 大阪 筛选 */}
           <div className="filter-item">
             <span>日程:</span>
             <select value={selectedVenue} onChange={(e) => { setSelectedVenue(e.target.value); setCurrentPage(1); }}>
@@ -531,7 +527,6 @@ export default function Home() {
           </div>
         </div>
         
-        {/* 第二排筛选（日期跟排序）分开一点比较好看 */}
         <div className="filter-row" style={{ marginTop: '15px' }}>
           <div className="filter-item">
             <span>開催期間:</span>
@@ -558,7 +553,7 @@ export default function Home() {
       <div style={{ marginBottom: '15px', fontSize: '13px', color: '#4a4a4a', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           📊 検索結果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
-          {totalCount > 0 && ` （${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件目を表示）`}
+          {totalCount > 0 && ` （${startIndex + 1} 〜 ${endIndex} 件目を表示）`}
         </div>
         {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 読み込み中...</div>}
       </div>
