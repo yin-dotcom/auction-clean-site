@@ -219,7 +219,6 @@ export default function Home() {
     }
   };
 
-  // ✅ 记得在 useEffect 依赖里加上我们新增加的这俩 State
   useEffect(() => {
     fetchRealData();
   }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState, selectedAuctionType, selectedVenue ]);
@@ -298,6 +297,9 @@ export default function Home() {
           headers.forEach((header, index) => {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, ''); 
+            
+            // ✅ 关键修复：自动跳过 CSV 中的 id 列，让 Supabase 自己生成全新的 id，避免覆盖报错
+            if (header.toLowerCase() === 'id') return;
             
             if (priceColumns.includes(header)) {
                const cleanedVal = val.replace(/[¥,]/g, '').trim();
@@ -461,7 +463,7 @@ export default function Home() {
 
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
             <button className="btn-search" style={{ background: '#ec407a' }} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              {uploading ? "処理中..." : "CSVアップ"}
+              {uploading ? "处理中..." : "CSVアップ"}
             </button>
           </div>
         </div>
