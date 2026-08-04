@@ -89,7 +89,7 @@ export default function Home() {
       const text = safeStr.substring(match[0].length).replace(/^[・\s]+|[・\s]+$/g, '').trim();
       return { rank: rank.toUpperCase(), text };
     }
-    return { rank: '', text: safeStr }; // 如果没有 Rank，就把整段话当成 text 保留
+    return { rank: '', text: safeStr };
   };
 
   useEffect(() => {
@@ -142,9 +142,6 @@ export default function Home() {
       setSelectedIndexes([]);
 
       let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
-
-      // ✅ 方案B 关键修改：直接在数据库层面过滤掉没有 extracted_rank 的数据！
-      query = query.not('extracted_rank', 'is', null).neq('extracted_rank', '');
 
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
@@ -200,8 +197,13 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      // ✅ 方案B 关键修改：不需要前端再 filter 了，拿到的 100 条就是绝对干净的 100 条！
-      setItems(data || []);
+      // 方案 A：前端过滤没有 Rank 的商品
+      const validData = (data || []).filter(item => {
+        const rawStatus = item['状態詳細'] || item['ランク'] || '';
+        return parseStatus(rawStatus).rank !== ''; 
+      });
+
+      setItems(validData);
       setTotalCount(count || 0);
 
     } catch (err: any) {
@@ -291,7 +293,7 @@ export default function Home() {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, ''); 
             
-            // ✅ 跳过 CSV 自带的 id 列
+            // 跳过 CSV 自带的 id 列防止报错
             if (header.toLowerCase() === 'id') return;
             
             if (priceColumns.includes(header)) {
@@ -306,11 +308,6 @@ export default function Home() {
                rowData[header] = val;
             }
           });
-
-          // ✅ 方案B 关键修改：在上传前提前提取 Rank 并存入 extracted_rank 字段
-          const rawStatusForUpload = rowData['状態詳細'] || rowData['ランク'] || '';
-          const { rank: extractedRank } = parseStatus(rawStatusForUpload);
-          rowData['extracted_rank'] = extractedRank || null;
 
           rowData['upload_batch'] = batchId;
           jsonRows.push(rowData);
@@ -447,7 +444,7 @@ export default function Home() {
                 }
               }}
             >
-              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全选择"}
+              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全選択"}
             </button>
 
             <button 
@@ -553,7 +550,7 @@ export default function Home() {
       <div style={{ marginBottom: '15px', fontSize: '13px', color: '#4a4a4a', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           📊 検索結果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
-          {totalCount > 0 && ` （${startIndex + 1} 〜 ${endIndex} 件目を表示）`}
+          {totalCount > 0 && ` （${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件目を表示）`}
         </div>
         {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 読み込み中...</div>}
       </div>
