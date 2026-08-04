@@ -36,11 +36,9 @@ export default function Home() {
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
-  
-  // ✅ 新增的筛选状态：举办形式 & 举办日程
-  const [selectedAuctionType, setSelectedAuctionType] = useState('ALL');
+  const [selectedMethod, setSelectedMethod] = useState('ALL'); 
   const [selectedVenue, setSelectedVenue] = useState('ALL');
-
+  
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -50,7 +48,7 @@ export default function Home() {
   const [dateSortState, setDateSortState] = useState<'none' | 'asc' | 'desc'>('none');
 
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
-  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
+  const [selectedItemsGlobal, setSelectedItemsGlobal] = useState<any[]>([]);
 
   const extractSortPrice = (val: any): number => {
     if (!val) return 0;
@@ -68,17 +66,6 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
-  const calculateAvgBid = (i1: any, i2: any, i3: any) => {
-    const p1 = extractSortPrice(i1);
-    const p2 = extractSortPrice(i2);
-    const p3 = extractSortPrice(i3);
-    let sum = 0, count = 0;
-    if (p1 > 0) { sum += p1; count++; }
-    if (p2 > 0) { sum += p2; count++; }
-    if (p3 > 0) { sum += p3; count++; }
-    return count > 0 ? Math.round(sum / count) : 0;
-  };
-
   const parseStatus = (statusStr: string) => {
     if (!statusStr) return { rank: '', text: '' };
     const safeStr = statusStr.trim();
@@ -91,7 +78,19 @@ export default function Home() {
       const text = safeStr.substring(match[0].length).replace(/^[・\s]+|[・\s]+$/g, '').trim();
       return { rank: rank.toUpperCase(), text };
     }
-    return { rank: '', text: '' };
+
+    return { rank: '', text: safeStr };
+  };
+
+  const calculateAvgBid = (i1: any, i2: any, i3: any) => {
+    const p1 = extractSortPrice(i1);
+    const p2 = extractSortPrice(i2);
+    const p3 = extractSortPrice(i3);
+    let sum = 0, count = 0;
+    if (p1 > 0) { sum += p1; count++; }
+    if (p2 > 0) { sum += p2; count++; }
+    if (p3 > 0) { sum += p3; count++; }
+    return count > 0 ? Math.round(sum / count) : 0;
   };
 
   useEffect(() => {
@@ -141,9 +140,11 @@ export default function Home() {
     try {
       setLoading(true);
       setError(null);
-      setSelectedIndexes([]);
 
-      let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
+      let query = supabase.from('jaa_items').select('id, 箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
+
+      // ✅【方案 B】：直接在数据库层面过滤掉 extracted_rank 为空的数据
+      query = query.not('extracted_rank', 'is', null).neq('extracted_rank', '');
 
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
@@ -167,12 +168,10 @@ export default function Home() {
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
 
-      // ✅ 举办形式筛选 (手競 / 入札) - 基于大会開催日
-      if (selectedAuctionType !== 'ALL') {
-        query = query.ilike('大会開催日', `%${selectedAuctionType}%`);
+      if (selectedMethod !== 'ALL') {
+        query = query.ilike('大会開催日', `%${selectedMethod}%`);
       }
-
-      // ✅ 举办日程筛选 (前期12 / 後期28 / 大阪16) - 基于大会開催日里的数字
+      
       if (selectedVenue !== 'ALL') {
         if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
         else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
@@ -201,14 +200,8 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      const validData = (data || []).filter(item => {
-        const rawStatus = item['状態詳細'] || item['ランク'] || '';
-        return parseStatus(rawStatus).rank !== ''; 
-      });
-
-      setItems(validData);
-      
-      // ✅ 解决方案A：抛弃被过滤掉的数字，直接使用数据库真实总数，这样分页就不乱跳了
+      // ✅ 因为我们在前面 query 已经过滤了，所以直接 set 即可，不用再做 .filter()
+      setItems(data || []);
       setTotalCount(count || 0);
 
     } catch (err: any) {
@@ -219,10 +212,9 @@ export default function Home() {
     }
   };
 
-  // ✅ 记得在 useEffect 依赖里加上我们新增加的这俩 State
   useEffect(() => {
     fetchRealData();
-  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState, selectedAuctionType, selectedVenue ]);
+  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, selectedMethod, selectedVenue, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
 
   const executeSearch = () => {
     setActiveSearchTerm(typedSearchTerm);
@@ -312,16 +304,32 @@ export default function Home() {
             }
           });
 
+          // ✅【方案 B】：在上传前，提前提取 Rank 并存入新建的 extracted_rank 列
+          const rawStatusForUpload = rowData['状態詳細'] || rowData['ランク'] || '';
+          const { rank: extractedRank } = parseStatus(rawStatusForUpload);
+          rowData['extracted_rank'] = extractedRank || null;
+
           rowData['upload_batch'] = batchId;
           jsonRows.push(rowData);
         }
 
-        setUploadStatus(`Supabaseへ ${jsonRows.length} 件登録中...`);
+        const BATCH_SIZE = 500;
+        let successCount = 0;
 
-        const { error: insertError } = await supabase.from('jaa_items').insert(jsonRows);
-        if (insertError) throw insertError;
+        for (let i = 0; i < jsonRows.length; i += BATCH_SIZE) {
+          const chunk = jsonRows.slice(i, i + BATCH_SIZE);
+          
+          setUploadStatus(`Supabaseへ送信中... (${i + 1} 〜 ${Math.min(i + BATCH_SIZE, jsonRows.length)} 件)`);
+          
+          const { error: upsertError } = await supabase
+            .from('jaa_items')
+            .upsert(chunk, { onConflict: 'id' });
 
-        setUploadStatus('🎉 アップロード成功！');
+          if (upsertError) throw upsertError;
+          successCount += chunk.length;
+        }
+
+        setUploadStatus(`🎉 アップロード成功！計 ${successCount} 件のデータを更新しました。`);
         setTimeout(() => setUploadStatus(null), 4000);
         
         fetchRealData(); 
@@ -335,21 +343,17 @@ export default function Home() {
       }
     };
     
-    reader.readAsText(file, 'utf-8');
+    reader.readAsText(file, 'Shift_JIS');
   };
 
   const handleDownloadCSV = () => {
-    if (selectedIndexes.length === 0) return;
+    if (selectedItemsGlobal.length === 0) return;
 
-    const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
-    if (selectedItems.length === 0) return;
-
-    const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id');
-
+    const headers = Object.keys(selectedItemsGlobal[0]).filter(k => k !== 'id' && k !== 'extracted_rank'); // 下载时剔除刚才新建的辅助列
     const csvRows = [];
     csvRows.push(headers.join(',')); 
 
-    selectedItems.forEach(item => {
+    selectedItemsGlobal.forEach(item => {
       const row = headers.map(header => {
         let val = item[header] === null || item[header] === undefined ? '' : String(item[header]);
         if (val.includes(',') || val.includes('\n') || val.includes('"')) {
@@ -440,24 +444,32 @@ export default function Home() {
               className="btn-search" 
               style={{ background: '#78909c' }} 
               onClick={() => {
-                if (selectedIndexes.length === items.length && items.length > 0) {
-                  setSelectedIndexes([]); 
+                const allSelectedOnPage = items.length > 0 && items.every(item => selectedItemsGlobal.some(s => s.id === item.id));
+                if (allSelectedOnPage) {
+                  setSelectedItemsGlobal(prev => prev.filter(p => !items.find(i => i.id === p.id)));
                 } else {
-                  setSelectedIndexes(items.map((_, idx) => idx)); 
+                  const newItems = items.filter(item => !selectedItemsGlobal.some(s => s.id === item.id));
+                  setSelectedItemsGlobal(prev => [...prev, ...newItems]);
                 }
               }}
             >
-              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全選択"}
+              {items.length > 0 && items.every(item => selectedItemsGlobal.some(s => s.id === item.id)) ? "現在のページ解除" : "現在のページ全選択"}
             </button>
 
             <button 
               className="btn-search" 
-              style={{ background: selectedIndexes.length > 0 ? '#42a5f5' : '#bbdefb', cursor: selectedIndexes.length > 0 ? 'pointer' : 'not-allowed' }} 
+              style={{ background: selectedItemsGlobal.length > 0 ? '#42a5f5' : '#bbdefb', cursor: selectedItemsGlobal.length > 0 ? 'pointer' : 'not-allowed' }} 
               onClick={handleDownloadCSV}
-              disabled={selectedIndexes.length === 0}
+              disabled={selectedItemsGlobal.length === 0}
             >
-              CSVダウンロード ({selectedIndexes.length})
+              CSV ({selectedItemsGlobal.length})
             </button>
+
+            {selectedItemsGlobal.length > 0 && (
+              <button className="btn-search" style={{ background: '#ff9800' }} onClick={() => setSelectedItemsGlobal([])}>
+                選択リセット
+              </button>
+            )}
 
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
             <button className="btn-search" style={{ background: '#ec407a' }} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -476,7 +488,7 @@ export default function Home() {
           <div className="filter-item">
             <span>大分類:</span>
             <select value={selectedMainCat} onChange={(e) => handleMainCatChange(e.target.value)}>
-              <option value="ALL">すべて</option>
+              <option value="ALL">すべて (ALL)</option>
               <option value="アパレル">アパレル</option>
               <option value="靴">靴</option>
               <option value="小物">小物</option>
@@ -497,40 +509,31 @@ export default function Home() {
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
-          
-          {/* ✅ 新增：手競 / 入札 筛选 */}
           <div className="filter-item">
-            <span>形式:</span>
-            <select value={selectedAuctionType} onChange={(e) => { setSelectedAuctionType(e.target.value); setCurrentPage(1); }}>
-              <option value="ALL">すべて</option>
-              <option value="手競">手競</option>
+            <span>開催方法:</span>
+            <select value={selectedMethod} onChange={(e) => { setSelectedMethod(e.target.value); setCurrentPage(1); }}>
+              <option value="ALL">すべて (ALL)</option>
               <option value="入札">入札</option>
+              <option value="手競り">手競り</option>
             </select>
           </div>
-          
-          {/* ✅ 新增：前期 / 後期 / 大阪 筛选 */}
           <div className="filter-item">
             <span>日程:</span>
             <select value={selectedVenue} onChange={(e) => { setSelectedVenue(e.target.value); setCurrentPage(1); }}>
-              <option value="ALL">すべて</option>
+              <option value="ALL">すべて (ALL)</option>
               <option value="前期">前期 (12日)</option>
               <option value="後期">後期 (28日)</option>
               <option value="大阪">大阪 (16日)</option>
             </select>
           </div>
-
           <div className="filter-item">
-            <span>表示:</span>
+            <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               <option value="100">100件</option>
               <option value="500">500件</option>
               <option value="1000">1000件</option>
             </select>
           </div>
-        </div>
-        
-        {/* 第二排筛选（日期跟排序）分开一点比较好看 */}
-        <div className="filter-row" style={{ marginTop: '15px' }}>
           <div className="filter-item">
             <span>開催期間:</span>
             <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
@@ -556,7 +559,7 @@ export default function Home() {
       <div style={{ marginBottom: '15px', fontSize: '13px', color: '#4a4a4a', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           📊 検索結果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
-          {totalCount > 0 && ` （${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件目を表示）`}
+          {totalCount > 0 && ` （${startIndex + 1} 〜 ${endIndex} 件目を表示）`}
         </div>
         {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 読み込み中...</div>}
       </div>
@@ -575,7 +578,6 @@ export default function Home() {
               const { rank, text: statusText } = parseStatus(rawStatus);
 
               const eventDate = item['大会開催日'] || item['日付'] || '';
-
               const ourSashine = formatPrice(item['自社指値'] || item['指値2'] || item['指値']);
               const imgUrl = item['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image';
 
@@ -586,7 +588,11 @@ export default function Home() {
               const c3Name = item['3番手顧客'] || '';
               const c3Bid = formatPrice(item['3番手入札']);
 
-              const isSelected = selectedIndexes.includes(index);
+              const showC1 = c1Name || item['1番手入札'];
+              const showC2 = c2Name || item['2番手入札'];
+              const showC3 = c3Name || item['3番手入札'];
+
+              const isSelected = selectedItemsGlobal.some(s => s.id === item.id);
 
               return (
                 <div 
@@ -598,8 +604,10 @@ export default function Home() {
                     className="checkbox-wrapper" 
                     onClick={(e) => {
                       e.stopPropagation();
-                      setSelectedIndexes(prev => 
-                        prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+                      setSelectedItemsGlobal(prev => 
+                        prev.some(s => s.id === item.id) 
+                          ? prev.filter(s => s.id !== item.id) 
+                          : [...prev, item]
                       );
                     }}
                   >
@@ -609,9 +617,13 @@ export default function Home() {
                   <img src={imgUrl} alt={brand} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
-                    {eventDate && <div style={{ marginBottom: '10px' }}><span className="tag-date">🗓 {eventDate}</span></div>}
+                    <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                      {eventDate && <span className="tag-date">🗓 {eventDate}</span>}
+                    </div>
 
-                    <div className="item-cat">{brand !== '不明' ? `${brand} / ` : ''}{subCategory}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="item-cat">{brand !== '不明' ? `${brand} / ` : ''}{subCategory}</span>
+                    </div>
 
                     <div className="item-feat" title={feature}>{feature}</div>
 
@@ -627,11 +639,11 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {(c1Name || c2Name || c3Name) && (
+                    {(showC1 || showC2 || showC3) && (
                       <div className="bid-list-card">
-                        {c1Name && <div className="bid-row"><span className="bid-user">① {c1Name}</span><span className="bid-val">{c1Bid}</span></div>}
-                        {c2Name && <div className="bid-row"><span className="bid-user">② {c2Name}</span><span className="bid-val">{c2Bid}</span></div>}
-                        {c3Name && <div className="bid-row"><span className="bid-user">③ {c3Name}</span><span className="bid-val">{c3Bid}</span></div>}
+                        {showC1 && <div className="bid-row"><span className="bid-user">① {c1Name}</span><span className="bid-val">{c1Bid}</span></div>}
+                        {showC2 && <div className="bid-row"><span className="bid-user">② {c2Name}</span><span className="bid-val">{c2Bid}</span></div>}
+                        {showC3 && <div className="bid-row"><span className="bid-user">③ {c3Name}</span><span className="bid-val">{c3Bid}</span></div>}
                       </div>
                     )}
                   </div>
@@ -652,7 +664,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* モーダル */}
       {activeModalItem && (
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -675,8 +686,10 @@ export default function Home() {
                 <div className="modal-details">
                   <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
                   <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
+                  
                   <p><b>ランク:</b> {modalRank ? <span style={{ color: '#f06292', fontWeight: 'bold' }}>{modalRank}</span> : 'なし'}</p>
                   {modalStatusText && <p><b>状態詳細:</b> {modalStatusText}</p>}
+
                   <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
                   <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
                   <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
@@ -688,9 +701,27 @@ export default function Home() {
                   </div>
 
                   <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>① {activeModalItem['1番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
+                    
+                    {(activeModalItem['1番手顧客'] || activeModalItem['1番手入札']) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>① {activeModalItem['1番手顧客'] || ''}</span>
+                        <b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b>
+                      </div>
+                    )}
+                    
+                    {(activeModalItem['2番手顧客'] || activeModalItem['2番手入札']) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                        <span>② {activeModalItem['2番手顧客'] || ''}</span>
+                        <b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b>
+                      </div>
+                    )}
+                    
+                    {(activeModalItem['3番手顧客'] || activeModalItem['3番手入札']) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                        <span>③ {activeModalItem['3番手顧客'] || ''}</span>
+                        <b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b>
+                      </div>
+                    )}
                     
                     {calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']) > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #f8bbd0', color: '#d81b60' }}>
@@ -729,41 +760,35 @@ export default function Home() {
         .btn-sort { background: white; border: 1px solid var(--primary-color); color: var(--primary-hover); padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s; outline: none; }
         .btn-sort:hover { background: var(--border-color); }
         .btn-sort.active { background: var(--primary-color); color: white; }
-        .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
+        .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
         
-        .item-card { background: white; border-radius: 12px; overflow: hidden; border: 1px solid #f0f0f0; transition: 0.3s; padding: 12px; position: relative; cursor: pointer; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-        .item-card:hover { box-shadow: 0 8px 20px rgba(244,143,177,0.15); transform: translateY(-2px); }
-        .item-card.selected { border: 2px solid #f06292; background: #fff0f5; }
+        .item-card { background: white; border-radius: 12px; overflow: hidden; border: 2px solid var(--border-color); transition: 0.3s; padding: 10px; position: relative; cursor: pointer; display: flex; flex-direction: column; }
+        .item-card:hover { box-shadow: 0 5px 15px rgba(244,143,177,0.2); transform: translateY(-2px); }
+        .item-card.selected { border: 2px solid #42a5f5; background: #e3f2fd; box-shadow: 0 4px 12px rgba(66, 165, 245, 0.3); }
         
-        .checkbox-wrapper { position: absolute; top: 20px; left: 20px; z-index: 20; background: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
-        .checkbox-wrapper:hover { transform: scale(1.1); border-color: #f06292; }
-        .checkbox-wrapper input { cursor: pointer; transform: scale(1.3); margin: 0; pointer-events: none; accent-color: #f06292; }
+        .checkbox-wrapper { position: absolute; top: 12px; left: 12px; z-index: 20; background: rgba(255, 255, 255, 0.95); padding: 6px; border-radius: 6px; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
+        .checkbox-wrapper:hover { transform: scale(1.1); border-color: #42a5f5; }
+        .checkbox-wrapper input { cursor: pointer; transform: scale(1.3); margin: 0; pointer-events: none; }
         
-        .item-card img { width: 100%; height: 220px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 15px; border: 1px solid #f5f5f5; }
+        .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 10px; }
+        .tag-date { background: #fce4ec; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; }
         
-        .tag-date { background: #fce4ec; color: #d81b60; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; display: inline-block; }
+        .item-info { padding: 5px; display: flex; flex-direction: column; flex: 1; }
+        .item-cat { font-size: 11px; color: var(--primary-hover); font-weight: bold; margin-bottom: 4px; }
+        .item-feat { font-size: 13px; margin: 4px 0 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
+        .tags-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-size: 11px; margin-top: auto; }
         
-        .item-info { display: flex; flex-direction: column; flex: 1; }
+        .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 8px; border-radius: 4px; border: 1px solid #f8bbd0; font-weight: bold; width: fit-content; line-height: 1.3; }
+        .tag-status { background: #f5f5f5; color: #4a4a4a; padding: 4px 8px; border-radius: 4px; border: 1px solid #e0e0e0; width: fit-content; line-height: 1.3; }
         
-        .item-cat { font-size: 13px; color: #d81b60; font-weight: bold; margin-bottom: 8px; line-height: 1.4; }
-        
-        .item-feat { font-size: 13px; margin: 4px 0 12px 0; height: 2.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; color: #333; }
-        
-        .tags-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; margin-top: auto; }
-        
-        .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 10px; border-radius: 4px; font-weight: bold; border: 1px solid #f8bbd0; font-size: 11px; }
-        .tag-status { background: #f5f5f5; color: #4a4a4a; padding: 4px 10px; border-radius: 4px; border: 1px solid #e0e0e0; font-size: 11px; }
-        
-        .price-list { margin-top: 10px; border-top: 1px dotted #e0e0e0; padding-top: 15px; }
+        .price-list { margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
         .price-row { display: flex; justify-content: space-between; align-items: center; }
-        .label { font-size: 13px; color: #888; }
-        .val-red { color: #d81b60; font-weight: bold; font-size: 18px; }
-        
-        .bid-list-card { margin-top: 12px; padding: 10px 12px; background: #fff0f5; border-radius: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 5px; }
+        .label { font-size: 12px; color: var(--text-muted); }
+        .val-red { color: #e74c3c; font-weight: bold; font-size: 15px; }
+        .bid-list-card { margin-top: 8px; padding: 6px 8px; background: #fff0f5; border-radius: 6px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
         .bid-row { display: flex; justify-content: space-between; align-items: center; }
         .bid-user { color: #4a4a4a; font-weight: 500; }
         .bid-val { color: #d81b60; font-weight: bold; }
-        
         .status-msg { grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; font-weight: bold; background: white; border-radius: 12px; border: 1px solid var(--border-color); }
         .pagination { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 30px; padding-bottom: 20px; grid-column: 1 / -1; }
         .page-btn { background: white; border: 1px solid var(--primary-color); color: var(--primary-hover); padding: 8px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; outline: none; }
