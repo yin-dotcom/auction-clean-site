@@ -36,6 +36,11 @@ export default function Home() {
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  
+  // ✅ 新增的筛选状态：举办形式 & 举办日程
+  const [selectedAuctionType, setSelectedAuctionType] = useState('ALL');
+  const [selectedVenue, setSelectedVenue] = useState('ALL');
+
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -63,7 +68,6 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
-  // ✅ 找回被我弄丢的 Top 3 平均价计算函数！
   const calculateAvgBid = (i1: any, i2: any, i3: any) => {
     const p1 = extractSortPrice(i1);
     const p2 = extractSortPrice(i2);
@@ -162,6 +166,18 @@ export default function Home() {
         else if (selectedStatus === 'C') query = query.not('状態詳細', 'ilike', '%BC%');
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
+
+      // ✅ 举办形式筛选 (手競 / 入札) - 基于大会開催日
+      if (selectedAuctionType !== 'ALL') {
+        query = query.ilike('大会開催日', `%${selectedAuctionType}%`);
+      }
+
+      // ✅ 举办日程筛选 (前期12 / 後期28 / 大阪16) - 基于大会開催日里的数字
+      if (selectedVenue !== 'ALL') {
+        if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
+        else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
+        else if (selectedVenue === '大阪') query = query.ilike('大会開催日', '%16%');
+      }
       
       if (startDate) {
         const dbStartDate = startDate.substring(2).replace(/-/g, '');
@@ -192,8 +208,8 @@ export default function Home() {
 
       setItems(validData);
       
-      const discardedCount = (data || []).length - validData.length;
-      setTotalCount(Math.max(0, (count || 0) - discardedCount));
+      // ✅ 解决方案A：抛弃被过滤掉的数字，直接使用数据库真实总数，这样分页就不乱跳了
+      setTotalCount(count || 0);
 
     } catch (err: any) {
       console.error('Fetch Error:', err);
@@ -203,9 +219,10 @@ export default function Home() {
     }
   };
 
+  // ✅ 记得在 useEffect 依赖里加上我们新增加的这俩 State
   useEffect(() => {
     fetchRealData();
-  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
+  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState, selectedAuctionType, selectedVenue ]);
 
   const executeSearch = () => {
     setActiveSearchTerm(typedSearchTerm);
@@ -459,7 +476,7 @@ export default function Home() {
           <div className="filter-item">
             <span>大分類:</span>
             <select value={selectedMainCat} onChange={(e) => handleMainCatChange(e.target.value)}>
-              <option value="ALL">すべて (ALL)</option>
+              <option value="ALL">すべて</option>
               <option value="アパレル">アパレル</option>
               <option value="靴">靴</option>
               <option value="小物">小物</option>
@@ -480,14 +497,40 @@ export default function Home() {
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
+          
+          {/* ✅ 新增：手競 / 入札 筛选 */}
           <div className="filter-item">
-            <span>表示件数:</span>
+            <span>形式:</span>
+            <select value={selectedAuctionType} onChange={(e) => { setSelectedAuctionType(e.target.value); setCurrentPage(1); }}>
+              <option value="ALL">すべて</option>
+              <option value="手競">手競</option>
+              <option value="入札">入札</option>
+            </select>
+          </div>
+          
+          {/* ✅ 新增：前期 / 後期 / 大阪 筛选 */}
+          <div className="filter-item">
+            <span>日程:</span>
+            <select value={selectedVenue} onChange={(e) => { setSelectedVenue(e.target.value); setCurrentPage(1); }}>
+              <option value="ALL">すべて</option>
+              <option value="前期">前期 (12日)</option>
+              <option value="後期">後期 (28日)</option>
+              <option value="大阪">大阪 (16日)</option>
+            </select>
+          </div>
+
+          <div className="filter-item">
+            <span>表示:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               <option value="100">100件</option>
               <option value="500">500件</option>
               <option value="1000">1000件</option>
             </select>
           </div>
+        </div>
+        
+        {/* 第二排筛选（日期跟排序）分开一点比较好看 */}
+        <div className="filter-row" style={{ marginTop: '15px' }}>
           <div className="filter-item">
             <span>開催期間:</span>
             <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
@@ -649,7 +692,6 @@ export default function Home() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
                     
-                    {/* ✅ Top 3 平均加回来了！ */}
                     {calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']) > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #f8bbd0', color: '#d81b60' }}>
                         <span>📈 トップ3平均</span>
