@@ -36,6 +36,8 @@ export default function Home() {
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  
+  // ✅ 新增的筛选状态：举办形式 & 举办日程
   const [selectedAuctionType, setSelectedAuctionType] = useState('ALL');
   const [selectedVenue, setSelectedVenue] = useState('ALL');
 
@@ -143,6 +145,9 @@ export default function Home() {
 
       let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
+      // ✅ 方案 2 核心：直接在数据库层面屏蔽没有 extracted_rank 的数据
+      query = query.not('extracted_rank', 'is', null).neq('extracted_rank', '');
+
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
         keywords.forEach(keyword => {
@@ -165,10 +170,12 @@ export default function Home() {
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
 
+      // ✅ 形式筛选 (手競 / 入札)
       if (selectedAuctionType !== 'ALL') {
         query = query.ilike('大会開催日', `%${selectedAuctionType}%`);
       }
 
+      // ✅ 日程筛选 (前期12 / 後期28 / 大阪16)
       if (selectedVenue !== 'ALL') {
         if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
         else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
@@ -197,13 +204,8 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      // 方案 A：前端过滤没有 Rank 的商品
-      const validData = (data || []).filter(item => {
-        const rawStatus = item['状態詳細'] || item['ランク'] || '';
-        return parseStatus(rawStatus).rank !== ''; 
-      });
-
-      setItems(validData);
+      // ✅ 方案 2 核心：不再进行前端 filter，直接使用后端返回的纯净数据
+      setItems(data || []);
       setTotalCount(count || 0);
 
     } catch (err: any) {
@@ -293,7 +295,7 @@ export default function Home() {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, ''); 
             
-            // 跳过 CSV 自带的 id 列防止报错
+            // ✅ 自动忽略 CSV 里的 id 列，避免上传时身份冲突报错
             if (header.toLowerCase() === 'id') return;
             
             if (priceColumns.includes(header)) {
@@ -309,16 +311,31 @@ export default function Home() {
             }
           });
 
+          // ✅ 方案 2 核心：上传前自动提取 Rank 存入 extracted_rank 字段
+          const rawStatusForUpload = rowData['状態詳細'] || rowData['ランク'] || '';
+          const { rank: extractedRank } = parseStatus(rawStatusForUpload);
+          rowData['extracted_rank'] = extractedRank || null;
+
           rowData['upload_batch'] = batchId;
           jsonRows.push(rowData);
         }
 
-        setUploadStatus(`Supabaseへ ${jsonRows.length} 件登録中...`);
+        // ✅ 增加分批上传机制（每次500条），防止两万多条数据一口气上传导致超时或崩溃
+        const BATCH_SIZE = 500;
+        let successCount = 0;
 
-        const { error: insertError } = await supabase.from('jaa_items').insert(jsonRows);
-        if (insertError) throw insertError;
+        for (let i = 0; i < jsonRows.length; i += BATCH_SIZE) {
+          const chunk = jsonRows.slice(i, i + BATCH_SIZE);
+          
+          setUploadStatus(`Supabaseへ送信中... (${i + 1} 〜 ${Math.min(i + BATCH_SIZE, jsonRows.length)} 件)`);
+          
+          const { error: insertError } = await supabase.from('jaa_items').insert(chunk);
+          if (insertError) throw insertError;
+          
+          successCount += chunk.length;
+        }
 
-        setUploadStatus('🎉 アップロード成功！');
+        setUploadStatus(`🎉 アップロード成功！計 ${successCount} 件のデータを登録しました。`);
         setTimeout(() => setUploadStatus(null), 4000);
         
         fetchRealData(); 
@@ -341,6 +358,7 @@ export default function Home() {
     const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
     if (selectedItems.length === 0) return;
 
+    // ✅ 下载时自动剔除辅助用的 extracted_rank 列
     const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id' && k !== 'extracted_rank');
 
     const csvRows = [];
@@ -523,7 +541,7 @@ export default function Home() {
             </select>
           </div>
         </div>
-        
+
         <div className="filter-row" style={{ marginTop: '15px' }}>
           <div className="filter-item">
             <span>開催期間:</span>
@@ -550,7 +568,7 @@ export default function Home() {
       <div style={{ marginBottom: '15px', fontSize: '13px', color: '#4a4a4a', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           📊 検索結果: <span style={{ color: '#f06292', fontSize: '16px' }}>{totalCount}</span> 件 
-          {totalCount > 0 && ` （${startIndex + 1} 〜 ${Math.min(startIndex + items.length, totalCount)} 件目を表示）`}
+          {totalCount > 0 && ` （${startIndex + 1} 〜 ${endIndex} 件目を表示）`}
         </div>
         {loading && <div style={{ color: '#f06292', fontSize: '12px' }}>🔄 読み込み中...</div>}
       </div>
