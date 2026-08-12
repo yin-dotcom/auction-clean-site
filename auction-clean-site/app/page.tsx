@@ -28,16 +28,11 @@ export default function Home() {
 
   const [typedSearchTerm, setTypedSearchTerm] = useState('');
   const [activeSearchTerm, setActiveSearchTerm] = useState('');
-  
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [filteredBrands, setFilteredBrands] = useState<string[]>([]);
-  const skipSuggest = useRef(false); 
 
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   
-  // ✅ 新增的筛选状态：举办形式 & 举办日程
   const [selectedAuctionType, setSelectedAuctionType] = useState('ALL');
   const [selectedVenue, setSelectedVenue] = useState('ALL');
 
@@ -94,49 +89,6 @@ export default function Home() {
     return { rank: '', text: safeStr };
   };
 
-  useEffect(() => {
-    if (skipSuggest.current) {
-      skipSuggest.current = false;
-      return;
-    }
-    if (!typedSearchTerm.trim()) {
-      setShowSuggestions(false);
-      setFilteredBrands([]);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      try {
-        const val = typedSearchTerm.trim();
-        const { data, error } = await supabase
-          .from('brands')
-          .select('en_name, jp_name')
-          .or(`jp_name.ilike.%${val}%,en_name.ilike.%${val}%`)
-          .limit(8);
-
-        if (!error && data && data.length > 0) {
-          const uniqueBrands = Array.from(new Set(data.map(d => d.en_name).filter(Boolean)));
-          setFilteredBrands(uniqueBrands);
-          setShowSuggestions(true);
-        } else {
-          setShowSuggestions(false);
-        }
-      } catch (err) {
-        console.error("Brand fetch error:", err);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [typedSearchTerm]);
-
-  const handleSelectBrand = (brandEn: string) => {
-    skipSuggest.current = true;
-    setTypedSearchTerm(brandEn);
-    setShowSuggestions(false);
-    setActiveSearchTerm(brandEn);
-    setCurrentPage(1);
-  };
-
   const fetchRealData = async () => {
     try {
       setLoading(true);
@@ -145,14 +97,49 @@ export default function Home() {
 
       let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
-      // ✅ 方案 2 核心：直接在数据库层面屏蔽没有 extracted_rank 的数据
       query = query.not('extracted_rank', 'is', null).neq('extracted_rank', '');
 
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
+        
+        // 自动提取双语翻译词库（无需用户手动选择备选项）
+        let brandSynonyms: any[] = [];
+        try {
+          const orConditions = keywords.map(kw => `jp_name.ilike.%${kw}%,en_name.ilike.%${kw}%`).join(',');
+          const { data } = await supabase
+            .from('brands')
+            .select('en_name, jp_name')
+            .or(orConditions)
+            .limit(15);
+            
+          if (data) brandSynonyms = data;
+        } catch (err) {
+          console.error("Failed to fetch brand synonyms", err);
+        }
+
         keywords.forEach(keyword => {
-          const t = `%${keyword}%`;
-          query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
+          const searchTerms = new Set<string>();
+          searchTerms.add(keyword);
+          
+          if (keyword.length >= 2) {
+            const matchedBrands = brandSynonyms.filter(b => 
+              (b.jp_name && b.jp_name.includes(keyword)) || 
+              (b.en_name && b.en_name.toLowerCase().includes(keyword.toLowerCase()))
+            );
+            
+            matchedBrands.slice(0, 3).forEach(b => {
+              if (b.en_name) searchTerms.add(b.en_name);
+              if (b.jp_name) searchTerms.add(b.jp_name);
+            });
+          }
+
+          const subConditions: string[] = [];
+          searchTerms.forEach(term => {
+            const t = `%${term}%`;
+            subConditions.push(`ブランド.ilike.${t}`, `特徴.ilike.${t}`, `中分類.ilike.${t}`, `箱番.ilike.${t}`);
+          });
+
+          query = query.or(subConditions.join(','));
         });
       }
 
@@ -170,12 +157,10 @@ export default function Home() {
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
 
-      // ✅ 形式筛选 (手競 / 入札)
       if (selectedAuctionType !== 'ALL') {
         query = query.ilike('大会開催日', `%${selectedAuctionType}%`);
       }
 
-      // ✅ 日程筛选 (前期12 / 後期28 / 大阪16)
       if (selectedVenue !== 'ALL') {
         if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
         else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
@@ -204,7 +189,6 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      // ✅ 方案 2 核心：不再进行前端 filter，直接使用后端返回的纯净数据
       setItems(data || []);
       setTotalCount(count || 0);
 
@@ -223,7 +207,6 @@ export default function Home() {
   const executeSearch = () => {
     setActiveSearchTerm(typedSearchTerm);
     setCurrentPage(1);
-    setShowSuggestions(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -295,7 +278,6 @@ export default function Home() {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, ''); 
             
-            // ✅ 自动忽略 CSV 里的 id 列，避免上传时身份冲突报错
             if (header.toLowerCase() === 'id') return;
             
             if (priceColumns.includes(header)) {
@@ -311,7 +293,6 @@ export default function Home() {
             }
           });
 
-          // ✅ 方案 2 核心：上传前自动提取 Rank 存入 extracted_rank 字段
           const rawStatusForUpload = rowData['状態詳細'] || rowData['ランク'] || '';
           const { rank: extractedRank } = parseStatus(rawStatusForUpload);
           rowData['extracted_rank'] = extractedRank || null;
@@ -320,7 +301,6 @@ export default function Home() {
           jsonRows.push(rowData);
         }
 
-        // ✅ 增加分批上传机制（每次500条），防止两万多条数据一口气上传导致超时或崩溃
         const BATCH_SIZE = 500;
         let successCount = 0;
 
@@ -358,7 +338,6 @@ export default function Home() {
     const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
     if (selectedItems.length === 0) return;
 
-    // ✅ 下载时自动剔除辅助用的 extracted_rank 列
     const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id' && k !== 'extracted_rank');
 
     const csvRows = [];
@@ -431,23 +410,8 @@ export default function Home() {
               value={typedSearchTerm}
               onChange={(e) => setTypedSearchTerm(e.target.value)}
               onKeyDown={handleKeyDown}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
             />
             <button className="btn-search" onClick={executeSearch}>検索</button>
-
-            {showSuggestions && filteredBrands.length > 0 && (
-              <div className="suggestions-dropdown">
-                {filteredBrands.map((brand, idx) => (
-                  <div 
-                    key={idx} 
-                    className="suggestion-item"
-                    onMouseDown={() => handleSelectBrand(brand)}
-                  >
-                    🔍 <b>{brand}</b> に変換
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
           
           <div style={{ marginLeft: '10px', display: 'flex', gap: '6px' }}>
@@ -731,10 +695,6 @@ export default function Home() {
         .btn-search { background-color: var(--primary-color); color: white; border: none; border-radius: 6px; padding: 10px 20px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-right: 2px; outline: none; white-space: nowrap; border: 1px solid transparent; }
         .btn-search:hover { filter: brightness(0.95); }
         .btn-search:disabled { opacity: 0.6; cursor: not-allowed; }
-        .suggestions-dropdown { position: absolute; top: calc(100% + 5px); left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 15px rgba(244,143,177,0.2); z-index: 100; max-height: 250px; overflow-y: auto; overflow-x: hidden; }
-        .suggestion-item { padding: 12px 15px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #fdfdfd; color: var(--text-main); transition: 0.2s; }
-        .suggestion-item:last-child { border-bottom: none; }
-        .suggestion-item:hover { background: var(--bg-color); color: var(--primary-hover); font-weight: bold; padding-left: 20px; }
         .filter-row { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
         .filter-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555; }
         select, input[type="date"] { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: white; outline: none; color: #4a4a4a; font-size: 13px; }
