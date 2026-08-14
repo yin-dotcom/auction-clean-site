@@ -37,15 +37,68 @@ async function putR2(key: string, bytes: Uint8Array, contentType: string) {
 }
 
 async function moveImage(row: JaaRow) {
-  const source = String(row['画像URL'] || '');
-  if (!source) return row;
-  const res = await fetch(source);
-  if (!res.ok) throw new Error(`${row['箱番']}: 画像取得 ${res.status}`);
-  const contentType = res.headers.get('content-type') || 'image/jpeg';
-  const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
-  const key = `jaa/${safePart(String(row['大会開催日']))}/${safePart(String(row['箱番']))}.${ext}`;
-  await putR2(key, new Uint8Array(await res.arrayBuffer()), contentType);
-  return { ...row, '画像URL': `${required('R2_PUBLIC_URL').replace(/\/$/, '')}/${key}` };
+  const source = String(row['画像URL'] || '').trim();
+
+  // 没有图片：保留商品数据，跳过R2上传
+  if (!source) {
+    return {
+      ...row,
+      '画像URL': null
+    };
+  }
+
+  try {
+    const res = await fetch(source);
+
+    // 图片失效：跳过图片，但继续上传商品数据
+    if (!res.ok) {
+      console.warn(
+        `${row['箱番']}: 画像取得失敗 ${res.status}`
+      );
+
+      return {
+        ...row,
+        '画像URL': null
+      };
+    }
+
+    const contentType =
+      res.headers.get('content-type') ||
+      'image/jpeg';
+
+    const ext = contentType.includes('png')
+      ? 'png'
+      : contentType.includes('webp')
+        ? 'webp'
+        : 'jpg';
+
+    const key =
+      `jaa/${safePart(String(row['大会開催日']))}/` +
+      `${safePart(String(row['箱番']))}.${ext}`;
+
+    await putR2(
+      key,
+      new Uint8Array(await res.arrayBuffer()),
+      contentType
+    );
+
+    return {
+      ...row,
+      '画像URL':
+        `${required('R2_PUBLIC_URL').replace(/\/$/, '')}/${key}`
+    };
+  } catch (error) {
+    // 网络异常或图片服务器拒绝访问时，也继续保存商品数据
+    console.warn(
+      `${row['箱番']}: 画像をスキップしました`,
+      error
+    );
+
+    return {
+      ...row,
+      '画像URL': null
+    };
+  }
 }
 
 export async function POST(request: Request) {
