@@ -53,6 +53,33 @@ export function prepareJaaCsv(text: string, filename: string) {
   const headerIndex = all.findIndex(r => r.includes('状態詳細') && r.includes('画像URL'));
   if (headerIndex < 0) throw new Error('状態詳細と画像URLを含む表頭が見つかりません。');
   const h = all[headerIndex].map(v => v.trim());
+
+  // 清洗后的总表模式：已经存在“自社指値”，不再要求原始表中的“【仮】指値”。
+  if (h.includes('自社指値') && !h.includes('【仮】指値')) {
+    const moneyFields = new Set(['指値', '自社指値', '1番手入札', '2番手入札', '3番手入札']);
+    const rows: JaaRow[] = [];
+    let withRank = 0, withoutRank = 0;
+    for (const source of all.slice(headerIndex + 1)) {
+      const getByName = (name: string) => (source[h.indexOf(name)] || '').trim();
+      const box = getByName('箱番');
+      if (!box) continue;
+      const state = cleanText(getByName('状態詳細'));
+      const rank = extractRank(state);
+      if (rank) withRank++; else withoutRank++;
+      const row: JaaRow = {};
+      for (let i = 0; i < h.length; i++) {
+        const name = h[i];
+        if (!name || name === 'id' || name === 'extracted_rank') continue;
+        const raw = (source[i] || '').trim();
+        row[name] = moneyFields.has(name) ? cleanMoney(raw) : name === '画像URL' ? raw : cleanText(raw) || null;
+      }
+      row['upload_batch'] = row['upload_batch'] || `auto_${row['大会開催日'] || eventName(filename)}`;
+      row['extracted_rank'] = rank || null;
+      rows.push(row);
+    }
+    return { rows, stats: { sourceRows: rows.length, imported: rows.length, visibleWithRank: withRank, hiddenWithoutRank: withoutRank, mode: 'cleaned_total' } };
+  }
+
   const stateI = h.indexOf('状態詳細');
   const boxI = h.indexOf('箱番', stateI);
   const originalPriceI = h.findIndex((v, i) => v === '指値' && i < stateI);
