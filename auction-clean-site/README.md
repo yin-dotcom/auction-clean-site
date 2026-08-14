@@ -5,11 +5,11 @@
 処理内容:
 
 1. `状態詳細`からRankを抽出（全角/半角対応）
-2. Rankあり、または自社指値ありの行を選択（damageだけの行は除外）
+2. 全行にRank解析を実行し、`extracted_rank`へ保存（damageだけの行はnull）
 3. 三つの指値を識別（原始指値、自社指値、仮指値）
 4. 原画像をCloudflare R2へコピー
 5. `画像URL`をR2公開URLへ置換
-6. `大会開催日 + 箱番`でSupabaseをupsert
+6. `大会開催日 + 箱番`でSupabaseをupsertし、サイト表示時はRankありだけを取得
 
 ## 初期設定
 

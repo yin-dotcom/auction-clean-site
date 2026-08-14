@@ -93,7 +93,7 @@ function processActiveRawSheet() {
   const ss = SpreadsheetApp.getActive(), sheet = ss.getActiveSheet();
   if (['总表','JAA設定'].indexOf(sheet.getName()) >= 0) throw new Error('原始データのシートを選択してください。');
   const result = processOneSheet_(ss, sheet);
-  SpreadsheetApp.getUi().alert('完了：' + result.stats.sourceRows + '件中 ' + result.stats.selected + '件を登録しました。');
+  SpreadsheetApp.getUi().alert('完了：' + result.stats.imported + '件を登録、Rankあり' + result.stats.visibleWithRank + '件を表示対象にしました。');
 }
 
 function runConfiguredJaaImports() {
@@ -113,7 +113,7 @@ function runConfiguredJaaImports() {
       if (hash === row[3]) { settings.getRange(i + 2, 6).setValue('変更なし'); return; }
       const result = processOneSheet_(source, sheet);
       settings.getRange(i + 2, 1).setValue(false);
-      settings.getRange(i + 2, 4, 1, 3).setValues([[result.hash, new Date(), '完了 ' + result.stats.selected + '件（処理済み）']]);
+      settings.getRange(i + 2, 4, 1, 3).setValues([[result.hash, new Date(), '完了 Rankあり' + result.stats.visibleWithRank + '件（処理済み）']]);
     } catch (e) { settings.getRange(i + 2, 6).setValue('失敗: ' + e.message); }
   });
 }

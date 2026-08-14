@@ -1,6 +1,6 @@
 export type JaaRow = Record<string, string | null>;
 
-const rankPattern = /(^|[^A-Z])(SA|AB|BC|S|A|B|C)(?![A-Z])/;
+const rankPattern = /(^|[^A-Z])(SA|AB|BC|S|A|B|C|D)(?![A-Z])/;
 
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -76,13 +76,11 @@ export function prepareJaaCsv(text: string, filename: string) {
   const get = (r: string[], i: number) => i >= 0 ? (r[i] || '').trim() : '';
   const event = eventName(filename);
   const output: JaaRow[] = [];
-  let selectedByRank = 0, selectedByOwnPrice = 0, excluded = 0;
+  let withRank = 0, withoutRank = 0;
 
   for (const source of all.slice(headerIndex + 1)) {
     const state = get(source, stateI), rank = extractRank(state), own = get(source, ownPriceI);
-    if (!rank && !own) { excluded++; continue; }
-    if (rank) selectedByRank++;
-    if (own) selectedByOwnPrice++;
+    if (rank) withRank++; else withoutRank++;
     const box = get(source, boxNumberI) && get(source, noI) ? `${get(source, boxNumberI)}-${get(source, noI)}` : get(source, boxI);
     if (!box) continue;
     const bid1 = bidder1I >= 0 ? get(source, bidder1I) : get(source, topCustomerI);
@@ -98,8 +96,8 @@ export function prepareJaaCsv(text: string, filename: string) {
       '2番手顧客': cleanText(get(source, bidder2I)) || null, '2番手入札': cleanMoney(bid2Amount),
       '3番手顧客': cleanText(get(source, bidder3I)) || null, '3番手入札': cleanMoney(bid3Amount),
       '画像URL': get(source, imageI), '大会開催日': event, 'upload_batch': `auto_${event}`,
-      'extracted_rank': rank,
+      'extracted_rank': rank || null,
     });
   }
-  return { rows: output, stats: { sourceRows: all.length - headerIndex - 1, selected: output.length, selectedByRank, selectedByOwnPrice, excluded } };
+  return { rows: output, stats: { sourceRows: all.length - headerIndex - 1, imported: output.length, visibleWithRank: withRank, hiddenWithoutRank: withoutRank } };
 }
