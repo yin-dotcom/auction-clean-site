@@ -88,7 +88,8 @@ function extractRank(state: string) {
 /**
  * 清洗价格。
  *
- * 小于100的数字按照“万”为单位乘以10000。
+ * 处理9、9.1等纯数字，以及レ8.2等文字＋数字。
+ * 小于100的数字或者含有小数点的数字按照“万”为单位乘以10000。
  */
 function cleanMoney(value: string) {
   const compact = value
@@ -99,9 +100,9 @@ function cleanMoney(value: string) {
     return null;
   }
 
-  // 纯数字
   const fullNumber = Number(compact);
 
+  // 处理9、9.1等纯数字
   if (Number.isFinite(fullNumber)) {
     return String(
       fullNumber > 0 && fullNumber < 100
@@ -110,7 +111,7 @@ function cleanMoney(value: string) {
     );
   }
 
-  // “レ8.2”等文字和数字混合的价格
+  // 处理レ8.2等文字＋数字
   const converted = compact.replace(
     /\d+(?:\.\d+)?/g,
     function(match) {
