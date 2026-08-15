@@ -91,23 +91,45 @@ function extractRank(state: string) {
  * 小于100的数字按照“万”为单位乘以10000。
  */
 function cleanMoney(value: string) {
-  const cleaned = value.replace(/[¥,\s]/g, '');
+  const compact = value
+    .normalize('NFKC')
+    .replace(/[¥,\s]/g, '');
 
-  if (!cleaned) {
+  if (!compact) {
     return null;
   }
 
-  const number = Number(cleaned);
+  // 纯数字
+  const fullNumber = Number(compact);
 
-  if (!Number.isFinite(number)) {
-    return value.trim() || null;
+  if (Number.isFinite(fullNumber)) {
+    return String(
+      fullNumber > 0 && fullNumber < 100
+        ? Math.round(fullNumber * 10000)
+        : fullNumber
+    );
   }
 
-  if (number > 0 && number < 100) {
-    return String(Math.round(number * 10000));
-  }
+  // “レ8.2”等文字和数字混合的价格
+  const converted = compact.replace(
+    /\d+(?:\.\d+)?/g,
+    function(match) {
+      const number = Number(match);
 
-  return String(number);
+      if (
+        match.includes('.') ||
+        (number > 0 && number < 100)
+      ) {
+        return String(
+          Math.round(number * 10000)
+        );
+      }
+
+      return match;
+    }
+  );
+
+  return converted || null;
 }
 
 /**
