@@ -45,13 +45,90 @@ function apiJson_(url, options) {
   return body;
 }
 
+/**
+ * 根据Google表格文件名＋标签页名称，
+ * 直接生成大会開催日。
+ */
+function getAuctionEventName_(sourceSpreadsheet, sourceSheet) {
+  const fullName =
+    String(sourceSpreadsheet.getName() || '') +
+    '-' +
+    String(sourceSheet.getName() || '');
+
+  const dateMatch = fullName.match(/\d{6}/);
+  const date = dateMatch ? dateMatch[0] : '';
+
+  if (fullName.indexOf('手競り') !== -1) {
+    return date + '手競り';
+  }
+
+  if (fullName.indexOf('入札') !== -1) {
+    return date + '入札';
+  }
+
+  return date;
+}
+
 function prepareSheet_(sourceSpreadsheet, sourceSheet) {
   const cfg = getJaaConfig_();
-  const csv = csvFromValues_(sourceSheet.getDataRange().getDisplayValues());
-  const name = sourceSpreadsheet.getName() + '-' + sourceSheet.getName() + '.csv';
-  const blob = Utilities.newBlob(csv, 'text/csv', name);
-  const prepared = apiJson_(cfg.base + '/api/prepare', { method: 'post', headers: { Authorization: 'Bearer ' + cfg.secret }, payload: { file: blob } });
-  return { prepared: prepared, csv: csv };
+
+  const csv = csvFromValues_(
+    sourceSheet
+      .getDataRange()
+      .getDisplayValues()
+  );
+
+  const name =
+    sourceSpreadsheet.getName() +
+    '-' +
+    sourceSheet.getName() +
+    '.csv';
+
+  const blob = Utilities.newBlob(
+    csv,
+    'text/csv',
+    name
+  );
+
+  const prepared = apiJson_(
+    cfg.base + '/api/prepare',
+    {
+      method: 'post',
+      headers: {
+        Authorization:
+          'Bearer ' + cfg.secret
+      },
+      payload: {
+        file: blob
+      }
+    }
+  );
+
+  /*
+   * 在GAS端再次强制设置大会開催日，
+   * 防止Vercel收到的文件名丢失“入札/手競り”。
+   */
+  const eventName = getAuctionEventName_(
+    sourceSpreadsheet,
+    sourceSheet
+  );
+
+  if (eventName && prepared.rows) {
+    prepared.rows = prepared.rows.map(
+      function(row) {
+        row['大会開催日'] = eventName;
+        row['upload_batch'] =
+          'auto_' + eventName;
+
+        return row;
+      }
+    );
+  }
+
+  return {
+    prepared: prepared,
+    csv: csv
+  };
 }
 
 function importRows_(rows) {
