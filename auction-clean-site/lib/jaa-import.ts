@@ -160,7 +160,7 @@ export function prepareJaaCsv(text: string, filename: string) {
 
       const box = getByName('箱番');
 
-      if (!box) continue;
+      // 跳过空白箱番和“ー-ー”等无效箱番 if (!box || /^[-ー－\s]+$/.test(box)) {   continue; }
 
       const state = cleanText(
         getByName('状態詳細')
@@ -340,7 +340,7 @@ export function prepareJaaCsv(text: string, filename: string) {
         ? `${get(source, boxNumberI)}-${get(source, noI)}`
         : get(source, boxI);
 
-    if (!box) continue;
+    // 跳过空白箱番和“ー-ー”等无效箱番 if (!box || /^[-ー－\s]+$/.test(box)) {   continue; }
 
     const bid1 =
       bidder1I >= 0
