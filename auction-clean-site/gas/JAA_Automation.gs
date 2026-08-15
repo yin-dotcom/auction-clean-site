@@ -17,7 +17,7 @@ function onOpen() {
 function setupJaaAutomation() {
   const ss = SpreadsheetApp.getActive();
   let s = ss.getSheetByName('JAA設定') || ss.insertSheet('JAA設定');
-  s.getRange(1, 1, 1, 6).setValues([['有効','スプレッドシートURL','シート名','最終ハッシュ','最終処理日時','状態']]);
+  s.getRange(1, 1, 1, 7).setValues([['有効','スプレッドシートURL','シート名','最終ハッシュ','最終処理日時','状態','次回開始位置']]);
   s.setFrozenRows(1);
   s.getRange('A2:A').insertCheckboxes();
   SpreadsheetApp.getUi().alert('JAA設定を作成しました。URLとシート名を入力し、有効にチェックしてください。');
@@ -45,90 +45,13 @@ function apiJson_(url, options) {
   return body;
 }
 
-/**
- * 根据Google表格文件名＋标签页名称，
- * 直接生成大会開催日。
- */
-function getAuctionEventName_(sourceSpreadsheet, sourceSheet) {
-  const fullName =
-    String(sourceSpreadsheet.getName() || '') +
-    '-' +
-    String(sourceSheet.getName() || '');
-
-  const dateMatch = fullName.match(/\d{6}/);
-  const date = dateMatch ? dateMatch[0] : '';
-
-  if (fullName.indexOf('手競り') !== -1) {
-    return date + '手競り';
-  }
-
-  if (fullName.indexOf('入札') !== -1) {
-    return date + '入札';
-  }
-
-  return date;
-}
-
 function prepareSheet_(sourceSpreadsheet, sourceSheet) {
   const cfg = getJaaConfig_();
-
-  const csv = csvFromValues_(
-    sourceSheet
-      .getDataRange()
-      .getDisplayValues()
-  );
-
-  const name =
-    sourceSpreadsheet.getName() +
-    '-' +
-    sourceSheet.getName() +
-    '.csv';
-
-  const blob = Utilities.newBlob(
-    csv,
-    'text/csv',
-    name
-  );
-
-  const prepared = apiJson_(
-    cfg.base + '/api/prepare',
-    {
-      method: 'post',
-      headers: {
-        Authorization:
-          'Bearer ' + cfg.secret
-      },
-      payload: {
-        file: blob
-      }
-    }
-  );
-
-  /*
-   * 在GAS端再次强制设置大会開催日，
-   * 防止Vercel收到的文件名丢失“入札/手競り”。
-   */
-  const eventName = getAuctionEventName_(
-    sourceSpreadsheet,
-    sourceSheet
-  );
-
-  if (eventName && prepared.rows) {
-    prepared.rows = prepared.rows.map(
-      function(row) {
-        row['大会開催日'] = eventName;
-        row['upload_batch'] =
-          'auto_' + eventName;
-
-        return row;
-      }
-    );
-  }
-
-  return {
-    prepared: prepared,
-    csv: csv
-  };
+  const csv = csvFromValues_(sourceSheet.getDataRange().getDisplayValues());
+  const name = sourceSpreadsheet.getName() + '-' + sourceSheet.getName() + '.csv';
+  const blob = Utilities.newBlob(csv, 'text/csv', name);
+  const prepared = apiJson_(cfg.base + '/api/prepare', { method: 'post', headers: { Authorization: 'Bearer ' + cfg.secret }, payload: { file: blob } });
+  return { prepared: prepared, csv: csv };
 }
 
 function importRows_(rows) {
@@ -178,19 +101,44 @@ function runConfiguredJaaImports() {
   if (!settings) throw new Error('先にJAA設定シートを作成してください。');
   const last = settings.getLastRow();
   if (last < 2) return;
-  const values = settings.getRange(2, 1, last - 1, 6).getValues();
-  values.forEach((row, i) => {
-    if (row[0] !== true || !row[1]) return;
+  const values = settings.getRange(2, 1, last - 1, 7).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    if (row[0] !== true || !row[1]) continue;
     try {
       const source = SpreadsheetApp.openByUrl(String(row[1]));
       const sheet = row[2] ? source.getSheetByName(String(row[2])) : source.getSheets()[0];
       if (!sheet) throw new Error('シートが見つかりません。');
-      const csv = csvFromValues_(sheet.getDataRange().getDisplayValues());
-      const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, csv, Utilities.Charset.UTF_8));
-      if (hash === row[3]) { settings.getRange(i + 2, 6).setValue('変更なし'); return; }
-      const result = processOneSheet_(source, sheet);
-      settings.getRange(i + 2, 1).setValue(false);
-      settings.getRange(i + 2, 4, 1, 3).setValues([[result.hash, new Date(), '完了 Rankあり' + result.stats.visibleWithRank + '件（処理済み）']]);
+      const preparedResult = prepareSheet_(source, sheet);
+      const prepared = preparedResult.prepared;
+      const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, preparedResult.csv, Utilities.Charset.UTF_8));
+      let offset = Number(row[6] || 0);
+      if (offset === 0 && hash === row[3]) { settings.getRange(i + 2, 1).setValue(false); settings.getRange(i + 2, 6).setValue('変更なし'); continue; }
+      const started = Date.now(), cfg = getJaaConfig_(), size = 20;
+      while (offset < prepared.rows.length && Date.now() - started < 240000) {
+        const result = apiJson_(cfg.base + '/api/import-batch', {
+          method: 'post', contentType: 'application/json', headers: { Authorization: 'Bearer ' + cfg.secret },
+          payload: JSON.stringify({ rows: prepared.rows.slice(offset, offset + size) })
+        });
+        upsertTotalSheet_(result.rows || []);
+        offset += Math.min(size, prepared.rows.length - offset);
+        settings.getRange(i + 2, 4).setValue(hash);
+        settings.getRange(i + 2, 6, 1, 2).setValues([['処理中 ' + offset + ' / ' + prepared.rows.length, offset]]);
+      }
+      if (offset >= prepared.rows.length) {
+        settings.getRange(i + 2, 1).setValue(false);
+        settings.getRange(i + 2, 5, 1, 3).setValues([[new Date(), '完了 Rankあり' + prepared.stats.visibleWithRank + '件（処理済み）', 0]]);
+      } else {
+        installResumeTrigger_();
+        return;
+      }
     } catch (e) { settings.getRange(i + 2, 6).setValue('失敗: ' + e.message); }
-  });
+  }
+}
+
+function installResumeTrigger_() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'runConfiguredJaaImports')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('runConfiguredJaaImports').timeBased().after(60 * 1000).create();
 }
