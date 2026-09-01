@@ -16,6 +16,18 @@ const MAIN_CAT_MAPPING: { [key: string]: string[] } = {
   "毛皮": ["コート", "ショール", "その他"]
 };
 
+// ✅ 新增：日文字符标准化函数 (平假名转片假名，半角转全角，英数字全角转半角)
+const normalizeJapaneseSearch = (text: string) => {
+  if (!text) return text;
+  // 1. Unicode 正規化 (NFKC): 半角カタカナ -> 全角カタカナ、全角英数字 -> 半角英数字
+  let normalized = text.normalize('NFKC');
+  // 2. ひらがな -> カタカナ 変換
+  normalized = normalized.replace(/[\u3041-\u3096]/g, (match) =>
+    String.fromCharCode(match.charCodeAt(0) + 0x60)
+  );
+  return normalized;
+};
+
 export default function Home() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +49,7 @@ export default function Home() {
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   
-  // ✅ 新增的筛选状态：举办形式 & 举办日程
+  // 筛选状态：举办形式 & 举办日程
   const [selectedAuctionType, setSelectedAuctionType] = useState('ALL');
   const [selectedVenue, setSelectedVenue] = useState('ALL');
 
@@ -52,19 +64,21 @@ export default function Home() {
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
 
+  // ✅ 修改：增加了 .normalize('NFKC') 以及全角 ￥、，的处理
   const extractSortPrice = (val: any): number => {
     if (!val) return 0;
-    const strVal = String(val).replace(/[¥,\s]/g, '');
+    const strVal = String(val).normalize('NFKC').replace(/[¥￥,\s]/g, '');
     const match = strVal.match(/-?\d+(\.\d+)?/);
     return match ? parseFloat(match[0]) : 0;
   };
 
+  // ✅ 修改：增加了 .normalize('NFKC') 以及全角 ￥、，的处理
   const formatPrice = (val: any) => {
     if (!val) return '-';
-    const strVal = String(val);
+    const strVal = String(val).normalize('NFKC');
     if (/[a-zA-Zぁ-んァ-ン一-龥]/.test(strVal)) return strVal;
     
-    const num = parseFloat(strVal.replace(/[¥,]/g, '').trim());
+    const num = parseFloat(strVal.replace(/[¥￥,]/g, '').trim());
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
@@ -82,7 +96,6 @@ export default function Home() {
   const parseStatus = (statusStr: string) => {
     if (!statusStr) return { rank: '', text: '' };
     const safeStr = statusStr.trim();
-
     const rankRegex = /^(?:ヴィン(?:テージ)?\s*)?[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+(?:\s+[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+)*/i;
     const match = safeStr.match(rankRegex);
 
@@ -94,6 +107,7 @@ export default function Home() {
     return { rank: '', text: safeStr };
   };
 
+  // ✅ 修改：在联想搜索中引入 normalizeJapaneseSearch
   useEffect(() => {
     if (skipSuggest.current) {
       skipSuggest.current = false;
@@ -107,7 +121,7 @@ export default function Home() {
 
     const timer = setTimeout(async () => {
       try {
-        const val = typedSearchTerm.trim();
+        const val = normalizeJapaneseSearch(typedSearchTerm.trim());
         const { data, error } = await supabase
           .from('brands')
           .select('en_name, jp_name')
@@ -145,12 +159,15 @@ export default function Home() {
 
       let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
-      // ✅ 方案 2 核心：直接在数据库层面屏蔽没有 extracted_rank 的数据
+      // 方案 2 核心：直接在数据库层面屏蔽没有 extracted_rank 的数据
       query = query.not('extracted_rank', 'is', null).neq('extracted_rank', '');
 
+      // ✅ 修改：对搜索词做日文标准化处理，并包含全角空格切割
       if (activeSearchTerm.trim()) {
-        const keywords = activeSearchTerm.trim().split(/[\s ]+/);
+        const normalizedTerm = normalizeJapaneseSearch(activeSearchTerm.trim());
+        const keywords = normalizedTerm.split(/[\s ]+/);
         keywords.forEach(keyword => {
+          if (!keyword) return;
           const t = `%${keyword}%`;
           query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
         });
@@ -170,12 +187,12 @@ export default function Home() {
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
 
-      // ✅ 形式筛选 (手競 / 入札)
+      // 形式筛选 (手競 / 入札)
       if (selectedAuctionType !== 'ALL') {
         query = query.ilike('大会開催日', `%${selectedAuctionType}%`);
       }
 
-      // ✅ 日程筛选 (前期12 / 後期28 / 大阪16)
+      // 日程筛选 (前期12 / 後期28 / 大阪16)
       if (selectedVenue !== 'ALL') {
         if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
         else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
@@ -204,7 +221,6 @@ export default function Home() {
       const { data, error: dbError, count } = await query;
       if (dbError) throw dbError;
 
-      // ✅ 方案 2 核心：不再进行前端 filter，直接使用后端返回的纯净数据
       setItems(data || []);
       setTotalCount(count || 0);
 
@@ -266,7 +282,7 @@ export default function Home() {
     const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
     if (selectedItems.length === 0) return;
 
-    // ✅ 下载时自动剔除辅助用的 extracted_rank 列
+    // 下载时自动剔除辅助用的 extracted_rank 列
     const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id' && k !== 'extracted_rank');
 
     const csvRows = [];
