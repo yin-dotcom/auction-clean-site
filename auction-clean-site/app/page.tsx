@@ -5,7 +5,15 @@ import { createClient } from '@supabase/supabase-js';
 
 const rawUrl = 'https://dqspprzxyqwtgkwzuweg.supabase.co';
 const rawKey = 'sb_publishable_xWVmfXjPbBM45y9xyhlcLA_y-Jz8cx-';
-const supabase = createClient(rawUrl, rawKey);
+
+// 强制 Supabase 客户端禁用前端缓存，每次都必须向数据库请求最新数据
+const supabase = createClient(rawUrl, rawKey, {
+  global: {
+    fetch: (url, options) => {
+      return fetch(url, { ...options, cache: 'no-store' });
+    },
+  },
+});
 
 const MAIN_CAT_MAPPING: { [key: string]: string[] } = {
   "アパレル": ["ジャケット・ブルゾン", "コート", "スーツ・セットアップ", "ダウンジャケット・コート", "トップス", "ワンピース", "Tシャツ", "ポロシャツ", "シャツ", "パンツ", "スカート", "ニット・セーター", "カーディガン", "アンサンブル", "パーカー", "ベスト", "ジャージ・スウェット", "キャミソール・チュニック", "オールインワン", "その他"],
