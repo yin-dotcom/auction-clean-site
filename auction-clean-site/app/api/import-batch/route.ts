@@ -11,6 +11,15 @@ function required(name: string) {
   return value;
 }
 
+// ✅ 新增：后端正则提取级别的函数（与你的前端逻辑一致）
+const extractRankFromStatus = (statusStr: string | undefined | null) => {
+  if (!statusStr) return null;
+  const safeStr = String(statusStr).trim();
+  const rankRegex = /^(?:ヴィン(?:テージ)?\s*)?[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+(?:\s+[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+)*/i;
+  const match = safeStr.match(rankRegex);
+  return match ? match[0].trim().toUpperCase() : null;
+};
+
 export async function POST(request: Request) {
   try {
     assertImportSecret(request);
@@ -19,12 +28,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '1回につき1～25件です。' }, { status: 400 });
     }
 
-    // 核心修改：完全不连接 Cloudflare R2，直接保留原始图片 URL
+    // ✅ 核心修复：解析状态并强制生成 extracted_rank 写入数据库
     const rows = body.rows.map(row => {
       const originalUrl = String(row['画像URL'] || '').trim();
+      
+      // 兼容原始字段名为 '状態詳細' 或 'ランク'
+      const rawStatus = row['状態詳細'] || row['ランク']; 
+      
+      // 提取级别，如果从 prepare 传过来了就用原来的，否则现场提取
+      const extractedRank = row['extracted_rank'] || extractRankFromStatus(rawStatus);
+
       return {
         ...row,
-        '画像URL': originalUrl ? originalUrl : null
+        '画像URL': originalUrl ? originalUrl : null,
+        'extracted_rank': extractedRank || null // 写入数据库，这样前端就不会把它当 null 隐藏了
       };
     });
 
